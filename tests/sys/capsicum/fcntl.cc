@@ -17,6 +17,12 @@
 #include "capsicum-test.h"
 #include "syscalls.h"
 
+#ifdef __redox__
+#define CAPSICUM_ERR_NOTCAPABLE EPERM
+#else
+#define CAPSICUM_ERR_NOTCAPABLE ENOTCAPABLE
+#endif
+
 // Ensure that fcntl() works consistently for both regular file descriptors and
 // capability-wrapped ones.
 FORK_TEST(Fcntl, Basic) {
@@ -63,7 +69,7 @@ FORK_TEST(Fcntl, Basic) {
     EXPECT_OK(cap) << " on " << ii->first;
     EXPECT_OK(cap_rights_limit(cap, &r_ro)) << " on " << ii->first;
     EXPECT_EQ(-1, fcntl(cap, F_GETFL, 0)) << " on " << ii->first;
-    EXPECT_EQ(ENOTCAPABLE, errno) << " on " << ii->first;
+    EXPECT_EQ(CAPSICUM_ERR_NOTCAPABLE, errno) << " on " << ii->first;
     close(cap);
   }
   for (FileMap::iterator ii = all.begin(); ii != all.end(); ++ii) {
@@ -171,11 +177,13 @@ TEST(Fcntl, Commands) {
   EXPECT_OK(cap_rights_get(newfd, &rights));
   EXPECT_RIGHTS_EQ(&(fcntl_rights[0]), &rights);
   close(newfd);
+#ifdef F_DUP2FD
   EXPECT_OK(fcntl(caps[0], F_DUP2FD, newfd));
   // dup2()'ed FD should have same rights.
   EXPECT_OK(cap_rights_get(newfd, &rights));
   EXPECT_RIGHTS_EQ(&(fcntl_rights[0]), &rights);
   close(newfd);
+#endif
 
   EXPECT_OK(fcntl(caps[0], F_GETFD, 0));
   EXPECT_OK(fcntl(caps[0], F_SETFD, 0));
@@ -183,8 +191,10 @@ TEST(Fcntl, Commands) {
   // Check operations that need CAP_FCNTL.
   int fd_flag = CHECK_FCNTL(CAP_FCNTL, caps, F_GETFL, 0);
   EXPECT_EQ(0, CHECK_FCNTL(CAP_FCNTL, caps, F_SETFL, fd_flag));
+#if defined(F_GETOWN) && defined(F_SETOWN)
   int owner = CHECK_FCNTL(CAP_FCNTL, sock_caps, F_GETOWN, 0);
   EXPECT_EQ(0, CHECK_FCNTL(CAP_FCNTL, sock_caps, F_SETOWN, owner));
+#endif
 
   // Check an operation needing CAP_FLOCK.
   struct flock fl;
@@ -251,6 +261,7 @@ TEST(Fcntl, WriteLock) {
   unlink(TmpFile("cap_fcntl_readlock"));
 }
 
+#ifndef __redox__
 TEST(Fcntl, SubRightNormalFD) {
   int fd = open(TmpFile("cap_fcntl_subrightnorm"), O_RDWR|O_CREAT, 0644);
   EXPECT_OK(fd);
@@ -400,3 +411,4 @@ TEST(Fcntl, OWNSubRights) {
 
   close(sock);
 }
+#endif // !__redox__

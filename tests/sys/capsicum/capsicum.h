@@ -6,8 +6,15 @@
 
 #include <stdio.h>
 
+#ifdef __redox__
+extern "C" {
+#include <sys/capsicum.h>
+#include <sys/caprights.h>
+}
+#else
 #include "capsicum-freebsd.h"
 #include "capsicum-rights.h"
+#endif
 
 /* New-style Capsicum API extras for debugging */
 static inline void cap_rights_describe(const cap_rights_t *rights, char *buffer) {

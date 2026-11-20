@@ -3,16 +3,18 @@
 // whether or not they return the expected ECAPMODE.
 #include <sys/types.h>
 #include <sys/socket.h>
+#ifdef __FreeBSD__
 #include <sys/sockio.h>
-#include <sys/stat.h>
 #include <sys/mount.h>
+#include <sys/ptrace.h>
+#include <sys/rtprio.h>
+#include <sys/thr.h>
+#endif
+#include <sys/stat.h>
 #include <sys/mman.h>
 #include <sys/wait.h>
 #include <sys/time.h>
 #include <sys/resource.h>
-#include <sys/rtprio.h>
-#include <sys/thr.h>
-#include <sys/ptrace.h>
 #include <dirent.h>
 #include <net/if.h>
 #include <netinet/in.h>
@@ -67,29 +69,41 @@ FORK_TEST_F(WithFiles, DisallowedFileSyscalls) {
 
   // System calls that are not permitted in capability mode.
   EXPECT_CAPMODE(access(TmpFile("cap_capmode_access"), F_OK));
+#ifdef __FreeBSD__
   EXPECT_CAPMODE(acct(TmpFile("cap_capmode_acct")));
+#endif
   EXPECT_CAPMODE(chdir(TmpFile("cap_capmode_chdir")));
+#ifdef __FreeBSD__
   EXPECT_CAPMODE(chflags(TmpFile("cap_capmode_chflags"), UF_NODUMP));
+#endif
   EXPECT_CAPMODE(chmod(TmpFile("cap_capmode_chmod"), 0644));
   EXPECT_CAPMODE(chown(TmpFile("cap_capmode_chown"), -1, -1));
   EXPECT_CAPMODE(chroot(TmpFile("cap_capmode_chroot")));
   EXPECT_CAPMODE(creat(TmpFile("cap_capmode_creat"), 0644));
   EXPECT_CAPMODE(fchdir(fd_dir_));
+#ifdef __FreeBSD__
   struct statfs statfs;
   EXPECT_CAPMODE(getfsstat(&statfs, sizeof(statfs), MNT_NOWAIT));
+#endif
   EXPECT_CAPMODE(link(TmpFile("foo"), TmpFile("bar")));
   struct stat sb;
   EXPECT_CAPMODE(lstat(TmpFile("cap_capmode_lstat"), &sb));
   EXPECT_CAPMODE(mknod(TmpFile("capmode_mknod"), 0644 | S_IFIFO, 0));
+#ifdef __FreeBSD__
   EXPECT_CAPMODE(bogus_mount_());
+#endif
   EXPECT_CAPMODE(open("/dev/null", O_RDWR));
   char buf[64];
   EXPECT_CAPMODE(readlink(TmpFile("cap_capmode_readlink"), buf, sizeof(buf)));
+#ifdef __FreeBSD__
   EXPECT_CAPMODE(revoke(TmpFile("cap_capmode_revoke")));
+#endif
   EXPECT_CAPMODE(stat(TmpFile("cap_capmode_stat"), &sb));
   EXPECT_CAPMODE(symlink(TmpFile("cap_capmode_symlink_from"), TmpFile("cap_capmode_symlink_to")));
   EXPECT_CAPMODE(unlink(TmpFile("cap_capmode_unlink")));
+#ifdef __FreeBSD__
   EXPECT_CAPMODE(umount2("/not_mounted", 0));
+#endif
 }
 
 FORK_TEST_F(WithFiles, DisallowedSocketSyscalls) {
@@ -116,7 +130,9 @@ FORK_TEST_F(WithFiles, AllowedFileSyscalls) {
   int fd_dup = dup(fd_file_);
   EXPECT_OK(fd_dup);
   EXPECT_OK(dup2(fd_file_, fd_dup));
+#ifdef __FreeBSD__
   EXPECT_OK(dup3(fd_file_, fd_dup, 0));
+#endif
   if (fd_dup >= 0) close(fd_dup);
 
   struct stat sb;
@@ -126,14 +142,18 @@ FORK_TEST_F(WithFiles, AllowedFileSyscalls) {
   EXPECT_OK(read(fd_file_, &ch, sizeof(ch)));
   EXPECT_OK(write(fd_file_, &ch, sizeof(ch)));
 
+#ifdef __FreeBSD__
   rc = fchflags(fd_file_, UF_NODUMP);
   if (rc < 0) {
     EXPECT_NE(ECAPMODE, errno);
   }
+#endif
 
+#ifdef __FreeBSD__
   char buf[1024];
   rc = getdents_(fd_dir_, (void*)buf, sizeof(buf));
   EXPECT_OK(rc);
+#endif
 
   char data[] = "123";
   EXPECT_OK(pwrite(fd_file_, data, 1, 0));
@@ -142,11 +162,13 @@ FORK_TEST_F(WithFiles, AllowedFileSyscalls) {
   struct iovec io;
   io.iov_base = data;
   io.iov_len = 2;
+#ifdef __FreeBSD__
 #if !defined(__i386__)
   // TODO(drysdale): reinstate these tests for 32-bit runs when possible
   // libc bug is fixed.
   EXPECT_OK(pwritev(fd_file_, &io, 1, 0));
   EXPECT_OK(preadv(fd_file_, &io, 1, 0));
+#endif
 #endif
   EXPECT_OK(writev(fd_file_, &io, 1));
   EXPECT_OK(readv(fd_file_, &io, 1));
@@ -172,7 +194,9 @@ FORK_TEST_F(WithFiles, AllowedSocketSyscalls) {
   EXPECT_FAIL_NOT_CAPMODE(sendmsg(fd_socket_, NULL, 0));
   EXPECT_FAIL_NOT_CAPMODE(sendto(fd_socket_, NULL, 0, 0, NULL, 0));
   off_t offset = 0;
+#ifdef __FreeBSD__
   EXPECT_FAIL_NOT_CAPMODE(sendfile_(fd_socket_, fd_file_, &offset, 1));
+#endif
 
   // The socket/socketpair syscalls are allowed, but they don't give
   // anything externally useful (can't call bind/connect on them).
@@ -201,7 +225,9 @@ FORK_TEST_F(WithFiles, AllowedSocketSyscallsIfRoot) {
   EXPECT_CAPMODE(socket(AF_INET6, SOCK_RAW, IPPROTO_TCP));
   EXPECT_CAPMODE(socket(AF_INET6, SOCK_RAW, IPPROTO_UDP));
 
+#ifdef __FreeBSD__
   EXPECT_CAPMODE(socket(AF_ROUTE, SOCK_RAW, 0));
+#endif
 
   // Interface configuration ioctls are not permitted in capability
   // mode.
@@ -290,6 +316,7 @@ FORK_TEST(Capmode, AllowedIdentifierSyscalls) {
   EXPECT_OK(setsid());
 }
 
+#ifdef __FreeBSD__
 FORK_TEST(Capmode, AllowedSchedSyscalls) {
   EXPECT_OK(cap_enter());  // Enter capability mode.
   int policy = sched_getscheduler(0);
@@ -306,6 +333,7 @@ FORK_TEST(Capmode, AllowedSchedSyscalls) {
   EXPECT_OK(sched_rr_get_interval(0, &ts));
   EXPECT_OK(sched_yield());
 }
+#endif
 
 
 FORK_TEST(Capmode, AllowedTimerSyscalls) {
@@ -325,11 +353,13 @@ FORK_TEST(Capmode, AllowedTimerSyscalls) {
 }
 
 
+#ifdef __FreeBSD__
 FORK_TEST(Capmode, AllowedProfilSyscall) {
   EXPECT_OK(cap_enter());  // Enter capability mode.
   char sbuf[32];
   EXPECT_OK(profil((profil_arg1_t*)sbuf, sizeof(sbuf), 0, 1));
 }
+#endif
 
 
 FORK_TEST(Capmode, AllowedResourceSyscalls) {
@@ -345,6 +375,7 @@ FORK_TEST(Capmode, AllowedResourceSyscalls) {
   EXPECT_OK(getrusage(RUSAGE_SELF, &ruse));
 }
 
+#ifdef __FreeBSD__
 FORK_TEST(CapMode, AllowedMmapSyscalls) {
   // mmap() some memory.
   size_t mem_size = getpagesize();
@@ -372,6 +403,7 @@ FORK_TEST(CapMode, AllowedMmapSyscalls) {
   // Unmap the memory.
   EXPECT_OK(munmap(mem, mem_size));
 }
+#endif
 
 FORK_TEST(Capmode, AllowedPipeSyscalls) {
   EXPECT_OK(cap_enter());  // Enter capability mode
@@ -421,7 +453,9 @@ TEST(Capmode, AllowedAtSyscalls) {
     struct timezone tz;
     EXPECT_OK(gettimeofday(&tv[0], &tz));
     EXPECT_OK(gettimeofday(&tv[1], &tz));
+#ifdef __FreeBSD__
     EXPECT_OK(futimesat(dfd, "testfile", tv));
+#endif
 
     EXPECT_OK(fchownat(dfd, "testfile",  fs.st_uid, fs.st_gid, 0));
     EXPECT_OK(linkat(dfd, "testfile", dfd, "linky", 0));
@@ -431,11 +465,13 @@ TEST(Capmode, AllowedAtSyscalls) {
     EXPECT_OK(unlinkat(dfd, "linky", 0));
     EXPECT_OK(unlinkat(dfd, "subdir", AT_REMOVEDIR));
 
+#ifdef __FreeBSD__
     // Check that invalid requests get a non-Capsicum errno.
     errno = 0;
     rc = readlinkat(-1, "symlink", buffer, sizeof(buffer));
     EXPECT_GE(0, rc);
     EXPECT_NE(ECAPMODE, errno);
+#endif
 
     exit(HasFailure());
   }
@@ -485,7 +521,9 @@ TEST(Capmode, AllowedAtSyscallsCwd) {
     struct timezone tz;
     EXPECT_OK(gettimeofday(&tv[0], &tz));
     EXPECT_OK(gettimeofday(&tv[1], &tz));
+#ifdef __FreeBSD__
     EXPECT_CAPMODE(futimesat(AT_FDCWD, "testfile", tv));
+#endif
 
     EXPECT_CAPMODE(fchownat(AT_FDCWD, "testfile",  fs.st_uid, fs.st_gid, 0));
     EXPECT_CAPMODE(linkat(AT_FDCWD, "testfile", AT_FDCWD, "linky", 0));
@@ -528,6 +566,7 @@ TEST(Capmode, Abort) {
   EXPECT_EQ(SIGABRT, WTERMSIG(status)) << " status = " << std::hex << status;
 }
 
+#ifdef __FreeBSD__
 FORK_TEST_F(WithFiles, AllowedMiscSyscalls) {
   umask(022);
   mode_t um_before = umask(022);
@@ -574,6 +613,7 @@ FORK_TEST_F(WithFiles, AllowedMiscSyscalls) {
   // TOOD(jra): write a test for other architectures, like arm
 #endif
 }
+#endif
 
 void *thread_fn(void *p) {
   int fd = (int)(intptr_t)p;
@@ -710,7 +750,8 @@ static void handle_signal(int) { signal_cnt++; }
 
 FORK_TEST(Capmode, SelfKill) {
   pid_t me = getpid();
-  sighandler_t original = signal(SIGUSR1, handle_signal);
+  // sighandler_t original = signal(SIGUSR1, handle_signal);
+  auto original = signal(SIGUSR1, handle_signal);
 
   pid_t child = fork();
   if (child == 0) {
@@ -735,6 +776,7 @@ FORK_TEST(Capmode, SelfKill) {
   signal(SIGUSR1, original);
 }
 
+#ifdef __FreeBSD__
 FORK_TEST(Capmode, SelfSched) {
   pid_t me = getpid();
   long my_tid, child_tid;
@@ -777,3 +819,4 @@ FORK_TEST(Capmode, SelfSched) {
   close(pipefds[0]);
   close(pipefds[1]);
 }
+#endif

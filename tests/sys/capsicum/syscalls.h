@@ -5,6 +5,47 @@
 #ifndef __SYSCALLS_H__
 #define __SYSCALLS_H__
 
+#ifdef __redox__
+
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/resource.h>
+#include <sys/mman.h>
+#include <sys/uio.h>
+
+#include <unistd.h>
+#include <dirent.h>
+#include <fcntl.h>
+#include <signal.h>
+#include <errno.h>
+#include <stddef.h>
+
+// Basic POSIX system calls
+#define getpid_     getpid
+#define getegid_    getegid
+#define getgid_     getgid
+#define geteuid_    geteuid
+#define getuid_     getuid
+#define getgroups_  getgroups
+#define getrlimit_  getrlimit
+
+// Network operations
+#define bind_       bind
+#define connect_    connect
+
+// Process and scheduling behavior
+#define MLOCK_REQUIRES_ROOT 0
+#define SCHED_SETSCHEDULER_REQUIRES_ROOT 0
+
+// Redox supports these operations only if verified
+// against the target relibc implementation.
+//
+// Do not define HAVE_SYSCTL, HAVE_BINDAT, HAVE_CONNECTAT,
+// HAVE_CHFLAGS, HAVE_GETFSSTAT, HAVE_REVOKE, HAVE_SYSARCH,
+// HAVE_SCTP, HAVE_PDWAIT, etc. without checking support.
+
+#else
+
 /* Map umount2 (Linux) syscall to unmount (FreeBSD) syscall */
 #define umount2(T, F) unmount(T, F)
 
@@ -126,4 +167,5 @@ inline long ptrace_(int request, pid_t pid, void *addr, void *data) {
 /* FreeBSD effectively only allows root to call sched_setscheduler */
 #define SCHED_SETSCHEDULER_REQUIRES_ROOT 1
 
+#endif /* __redox__ */
 #endif /*__SYSCALLS_H__*/

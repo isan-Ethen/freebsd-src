@@ -1,12 +1,13 @@
 #include "capsicum-test.h"
 
+#ifdef __FreeBSD__
 #include <sys/param.h>
 #include <sys/proc.h>
 #include <sys/queue.h>
-#include <sys/socket.h>
 #include <sys/sysctl.h>
 #include <sys/user.h>
 #include <libprocstat.h>
+#endif
 
 #include <stdio.h>
 #include <string.h>
@@ -36,6 +37,10 @@ const char *TmpFile(const char *p) {
 }
 
 char ProcessState(int pid) {
+#ifdef __redox__
+  ADD_FAILURE() << "ProcessState not implemented on Redox: " << pid;
+  return '?';
+#else
   // First check if the process exists/we have permission to see it. This
   // Avoids warning messages being printed to stderr by libprocstat.
   size_t len = 0;
@@ -93,4 +98,5 @@ char ProcessState(int pid) {
   procstat_close(prstat);
   if (verbose) fprintf(stderr, "Process %d in state '%c'\n", pid, result);
   return result;
+#endif
 }

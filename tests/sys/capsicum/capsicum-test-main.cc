@@ -1,5 +1,7 @@
 #include <sys/types.h>
+#ifdef __FreeBSD__
 #include <sys/sysctl.h>
+#endif
 #include <ctype.h>
 #include <errno.h>
 #include <libgen.h>
@@ -10,6 +12,10 @@
 #include <iostream>
 #include "gtest/gtest.h"
 #include "capsicum-test.h"
+
+#ifdef __redox__
+#include <sys/capsicum.h>
+#endif
 
 std::string tmpdir;
 
@@ -28,6 +34,7 @@ public:
     std::cerr << tmpdir << std::endl;
   }
   void CheckCapsicumSupport() {
+#ifdef __FreeBSD__
     int rc;
     bool trap_enotcap_enabled;
     size_t trap_enotcap_enabled_len = sizeof(trap_enotcap_enabled);
@@ -49,6 +56,11 @@ public:
                    << "Skipping tests because its enablement invalidates the "
                    << "test results.";
     }
+#elif defined(__redox__)
+    unsigned int mode = 0;
+    ASSERT_EQ(0, cap_getmode(&mode));
+    ASSERT_EQ(0U, mode);
+#endif
   }
   void CreateTemporaryRoot() {
     char *tmpdir_name = tempnam(nullptr, "cptst");

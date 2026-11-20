@@ -169,12 +169,22 @@ const char *TmpFile(const char *pathname);
       EXPECT_NE(E, errno) << strerror(E); \
     } while (0)
 
+#ifdef __redox__
+#define CAPSICUM_ERR_CAPMODE EPERM
+#define CAPSICUM_ERR_NOTCAPABLE EPERM
+#else
+#define CAPSICUM_ERR_CAPMODE ECAPMODE
+#define CAPSICUM_ERR_NOTCAPABLE ENOTCAPABLE
+#endif
+
+#define EXPECT_NOTCAPABLE(C) \
+    EXPECT_SYSCALL_FAIL(CAPSICUM_ERR_NOTCAPABLE, C)
 // Expect a void syscall to fail with anything other than the given error.
 #define EXPECT_VOID_SYSCALL_FAIL_NOT(E, C)   \
     do { \
       errno = 0; \
       C; \
-      EXPECT_NE(E, errno) << #C << " failed with ECAPMODE"; \
+      EXPECT_NE(E, errno) << #C << " failed with CAPSICUM_ERR_CAPMODE"; \
     } while (0)
 
 // Expect a system call to fail due to path traversal; exact error
@@ -201,26 +211,26 @@ const char *TmpFile(const char *pathname);
     } while (0)
 #endif
 
-// Expect a system call to fail with ECAPMODE.
-#define EXPECT_CAPMODE(C) EXPECT_SYSCALL_FAIL(ECAPMODE, C)
+// Expect a system call to fail with CAPSICUM_ERR_CAPMODE.
+#define EXPECT_CAPMODE(C) EXPECT_SYSCALL_FAIL(CAPSICUM_ERR_CAPMODE, C)
 
-// Expect a system call to fail, but not with ECAPMODE.
-#define EXPECT_FAIL_NOT_CAPMODE(C) EXPECT_SYSCALL_FAIL_NOT(ECAPMODE, C)
-#define EXPECT_FAIL_VOID_NOT_CAPMODE(C) EXPECT_VOID_SYSCALL_FAIL_NOT(ECAPMODE, C)
+// Expect a system call to fail, but not with CAPSICUM_ERR_CAPMODE.
+#define EXPECT_FAIL_NOT_CAPMODE(C) EXPECT_SYSCALL_FAIL_NOT(CAPSICUM_ERR_CAPMODE, C)
+#define EXPECT_FAIL_VOID_NOT_CAPMODE(C) EXPECT_VOID_SYSCALL_FAIL_NOT(CAPSICUM_ERR_CAPMODE, C)
 
-// Expect a system call to fail with ENOTCAPABLE.
-#define EXPECT_NOTCAPABLE(C) EXPECT_SYSCALL_FAIL(ENOTCAPABLE, C)
+// Expect a system call to fail with CAPSICUM_ERR_NOTCAPABLE.
+#define EXPECT_NOTCAPABLE(C) EXPECT_SYSCALL_FAIL(CAPSICUM_ERR_NOTCAPABLE, C)
 
-// Expect a system call to fail, but not with ENOTCAPABLE.
-#define EXPECT_FAIL_NOT_NOTCAPABLE(C) EXPECT_SYSCALL_FAIL_NOT(ENOTCAPABLE, C)
+// Expect a system call to fail, but not with CAPSICUM_ERR_NOTCAPABLE.
+#define EXPECT_FAIL_NOT_NOTCAPABLE(C) EXPECT_SYSCALL_FAIL_NOT(CAPSICUM_ERR_NOTCAPABLE, C)
 
-// Expect a system call to fail with either ENOTCAPABLE or ECAPMODE.
+// Expect a system call to fail with either CAPSICUM_ERR_NOTCAPABLE or CAPSICUM_ERR_CAPMODE.
 #define EXPECT_CAPFAIL(C) \
     do { \
       int rc = C; \
       EXPECT_GT(0, rc); \
-      EXPECT_TRUE(errno == ECAPMODE || errno == ENOTCAPABLE) \
-        << #C << " did not fail with ECAPMODE/ENOTCAPABLE but " << errno \
+      EXPECT_TRUE(errno == CAPSICUM_ERR_CAPMODE || errno == CAPSICUM_ERR_NOTCAPABLE) \
+        << #C << " did not fail with CAPSICUM_ERR_CAPMODE/CAPSICUM_ERR_NOTCAPABLE but " << errno \
         << "(" << strerror(errno) << ")"; \
     } while (0)
 

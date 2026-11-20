@@ -17,6 +17,14 @@
 #include "syscalls.h"
 #include "capsicum-test.h"
 
+// Redox currently reports EPERM for capability denials.
+// Keep this distinct from FreeBSD's ENOTCAPABLE until errno compatibility exists.
+#ifdef __redox__
+static constexpr int notCapableErrno = EPERM;
+#else
+static constexpr int notCapableErrno = ENOTCAPABLE;
+#endif
+
 /* Utilities for printing rights information */
 /* Written in C style to allow for: */
 /* TODO(drysdale): migrate these to somewhere in libcaprights/ */
@@ -379,14 +387,14 @@ FORK_TEST_ON(Capability, Inheritance, TmpFile("cap_openat_write_testfile")) {
     EXPECT_EQ(-1, result) << " need: " << rights_needed \
                           << std::endl                  \
                           << " got:  "<< rights;        \
-    EXPECT_EQ(ENOTCAPABLE, errno);                      \
+    EXPECT_EQ(notCapableErrno, errno);                      \
   }                                                     \
 } while (0)
 
 #define EXPECT_MMAP_NOTCAPABLE(result) do {         \
   void *rv = result;                                \
   EXPECT_EQ(MAP_FAILED, rv);                        \
-  EXPECT_EQ(ENOTCAPABLE, errno);                    \
+  EXPECT_EQ(notCapableErrno, errno);                    \
   if (rv != MAP_FAILED) munmap(rv, getpagesize());  \
 } while (0)
 
@@ -484,6 +492,7 @@ static void TryFileOps(int fd, cap_rights_t rights) {
   char ch;
   CHECK_RIGHT_RESULT(read(cap_fd, &ch, sizeof(ch)), rights, CAP_READ, 0);
 
+#ifdef __FreeBSD__
   ssize_t len1 = pread(cap_fd, &ch, sizeof(ch), 0);
   CHECK_RIGHT_RESULT(len1, rights, CAP_PREAD);
   ssize_t len2 = pread(cap_fd, &ch, sizeof(ch), 0);
@@ -493,7 +502,10 @@ static void TryFileOps(int fd, cap_rights_t rights) {
   CHECK_RIGHT_RESULT(write(cap_fd, &ch, sizeof(ch)), rights, CAP_WRITE, 0);
   CHECK_RIGHT_RESULT(pwrite(cap_fd, &ch, sizeof(ch), 0), rights, CAP_PWRITE);
   CHECK_RIGHT_RESULT(lseek(cap_fd, 0, SEEK_SET), rights, CAP_SEEK);
+#endif
 
+  // FreeBSD-specific filesystem flag operations.
+#ifdef __FreeBSD__
   // Note: this is not expected to work over NFS.
   struct statfs sf;
   EXPECT_OK(fstatfs(fd, &sf));
@@ -501,7 +513,9 @@ static void TryFileOps(int fd, cap_rights_t rights) {
   if (!is_nfs) {
     CHECK_RIGHT_RESULT(fchflags(cap_fd, UF_NODUMP), rights, CAP_FCHFLAGS);
   }
+#endif // __FreeBSD__
 
+#ifdef __FreeBSD__
   CHECK_RIGHT_MMAP_RESULT(mmap(NULL, getpagesize(), PROT_NONE, MAP_SHARED, cap_fd, 0),
                           rights, CAP_MMAP);
   CHECK_RIGHT_MMAP_RESULT(mmap(NULL, getpagesize(), PROT_READ, MAP_SHARED, cap_fd, 0),
@@ -518,6 +532,7 @@ static void TryFileOps(int fd, cap_rights_t rights) {
                           rights, CAP_MMAP_WX);
   CHECK_RIGHT_MMAP_RESULT(mmap(NULL, getpagesize(), PROT_READ | PROT_WRITE | PROT_EXEC, MAP_SHARED, cap_fd, 0),
                           rights, CAP_MMAP_RWX);
+#endif
 
   CHECK_RIGHT_RESULT(fsync(cap_fd), rights, CAP_FSYNC);
 
@@ -530,19 +545,24 @@ static void TryFileOps(int fd, cap_rights_t rights) {
 
   CHECK_RIGHT_RESULT(fchmod(cap_fd, 0644), rights, CAP_FCHMOD);
 
+#ifdef __FreeBSD__
   CHECK_RIGHT_RESULT(flock(cap_fd, LOCK_SH), rights, CAP_FLOCK);
   CHECK_RIGHT_RESULT(flock(cap_fd, LOCK_UN), rights, CAP_FLOCK);
+#endif
 
   CHECK_RIGHT_RESULT(ftruncate(cap_fd, 0), rights, CAP_FTRUNCATE);
 
   struct stat sb;
   CHECK_RIGHT_RESULT(fstat(cap_fd, &sb), rights, CAP_FSTAT);
 
+#ifdef __FreeBSD__
   struct statfs cap_sf;
   CHECK_RIGHT_RESULT(fstatfs(cap_fd, &cap_sf), rights, CAP_FSTATFS);
 
   CHECK_RIGHT_RESULT(futimes(cap_fd, NULL), rights, CAP_FUTIMES);
+#endif // __FreeBSD__
 
+#ifdef __FreeBSD__
   struct pollfd pollfd;
   pollfd.fd = cap_fd;
   pollfd.events = POLLIN | POLLERR | POLLHUP;
@@ -569,6 +589,7 @@ static void TryFileOps(int fd, cap_rights_t rights) {
   } else {
     EXPECT_NOTCAPABLE(ret);
   }
+#endif
 
   // TODO(FreeBSD): kqueue
 
@@ -585,29 +606,42 @@ FORK_TEST_ON(Capability, Operations, TmpFile("cap_fd_operations")) {
   // Try a variety of different combinations of rights - a full
   // enumeration is too large (2^N with N~30+) to perform.
   TRY_FILE_OPS(fd, CAP_READ);
+#ifdef __FreeBSD__
   TRY_FILE_OPS(fd, CAP_PREAD);
+#endif
   TRY_FILE_OPS(fd, CAP_WRITE);
+#ifdef __FreeBSD__
   TRY_FILE_OPS(fd, CAP_PWRITE);
+#endif
   TRY_FILE_OPS(fd, CAP_READ, CAP_WRITE);
+#ifdef __FreeBSD__
   TRY_FILE_OPS(fd, CAP_PREAD, CAP_PWRITE);
+#endif
   TRY_FILE_OPS(fd, CAP_SEEK);
+#ifdef __FreeBSD__
   TRY_FILE_OPS(fd, CAP_FCHFLAGS);
   TRY_FILE_OPS(fd, CAP_IOCTL);
+#endif
   TRY_FILE_OPS(fd, CAP_FSTAT);
   TRY_FILE_OPS(fd, CAP_MMAP);
   TRY_FILE_OPS(fd, CAP_MMAP_R);
   TRY_FILE_OPS(fd, CAP_MMAP_W);
+#ifdef __FreeBSD__
   TRY_FILE_OPS(fd, CAP_MMAP_X);
+#endif
+#ifdef __FreeBSD__
   TRY_FILE_OPS(fd, CAP_MMAP_RW);
   TRY_FILE_OPS(fd, CAP_MMAP_RX);
   TRY_FILE_OPS(fd, CAP_MMAP_WX);
   TRY_FILE_OPS(fd, CAP_MMAP_RWX);
+#endif
   TRY_FILE_OPS(fd, CAP_FCNTL);
   TRY_FILE_OPS(fd, CAP_EVENT);
   TRY_FILE_OPS(fd, CAP_FSYNC);
   TRY_FILE_OPS(fd, CAP_FCHOWN);
   TRY_FILE_OPS(fd, CAP_FCHMOD);
   TRY_FILE_OPS(fd, CAP_FTRUNCATE);
+#ifdef __FreeBSD__
   TRY_FILE_OPS(fd, CAP_FLOCK);
   TRY_FILE_OPS(fd, CAP_FSTATFS);
   TRY_FILE_OPS(fd, CAP_FPATHCONF);
@@ -627,6 +661,7 @@ FORK_TEST_ON(Capability, Operations, TmpFile("cap_fd_operations")) {
   TRY_FILE_OPS(fd, CAP_GETPEERNAME);
   TRY_FILE_OPS(fd, CAP_GETSOCKNAME);
   TRY_FILE_OPS(fd, CAP_ACCEPT);
+#endif
 
   close(fd);
 }
@@ -664,6 +699,7 @@ static void TryDirOps(int dirfd, cap_rights_t rights) {
     EXPECT_OK(unlinkat(dirfd, "cap_create", 0));
   }
 
+#ifdef __FreeBSD__
   rc = openat(dirfd, "cap_faccess", O_CREAT, 0600);
   EXPECT_OK(rc);
   EXPECT_OK(close(rc));
@@ -705,7 +741,9 @@ static void TryDirOps(int dirfd, cap_rights_t rights) {
     EXPECT_OK(close(rc));
   }
   EXPECT_OK(unlinkat(dirfd, "cap_fsync", 0));
+#endif
 
+#ifdef __FreeBSD__
   rc = openat(dirfd, "cap_ftruncate", O_CREAT, 0600);
   EXPECT_OK(rc);
   EXPECT_OK(close(rc));
@@ -725,6 +763,7 @@ static void TryDirOps(int dirfd, cap_rights_t rights) {
     EXPECT_OK(close(rc));
   }
   EXPECT_OK(unlinkat(dirfd, "cap_ftruncate", 0));
+#endif
 
   rc = openat(dfd_cap, "cap_create", O_CREAT | O_WRONLY, 0600);
   CHECK_RIGHT_RESULT(rc, rights, CAP_CREATE, CAP_WRITE, CAP_SEEK, CAP_LOOKUP);
@@ -739,6 +778,7 @@ static void TryDirOps(int dirfd, cap_rights_t rights) {
     EXPECT_OK(unlinkat(dirfd, "cap_create", 0));
   }
 
+#ifdef __FreeBSD__
   rc = openat(dirfd, "cap_fsync", O_CREAT, 0600);
   EXPECT_OK(rc);
   EXPECT_OK(close(rc));
@@ -767,13 +807,16 @@ static void TryDirOps(int dirfd, cap_rights_t rights) {
     EXPECT_OK(close(rc));
   }
   EXPECT_OK(unlinkat(dirfd, "cap_fsync", 0));
+#endif
 
+#ifdef __FreeBSD__
   rc = openat(dirfd, "cap_chflagsat", O_CREAT, 0600);
   EXPECT_OK(rc);
   EXPECT_OK(close(rc));
   rc = chflagsat(dfd_cap, "cap_chflagsat", UF_NODUMP, 0);
   CHECK_RIGHT_RESULT(rc, rights, CAP_CHFLAGSAT, CAP_LOOKUP);
   EXPECT_OK(unlinkat(dirfd, "cap_chflagsat", 0));
+#endif // __FreeBSD__
 
   rc = openat(dirfd, "cap_fchownat", O_CREAT, 0600);
   EXPECT_OK(rc);
@@ -797,12 +840,14 @@ static void TryDirOps(int dirfd, cap_rights_t rights) {
   CHECK_RIGHT_RESULT(rc, rights, CAP_FSTAT, CAP_LOOKUP);
   EXPECT_OK(unlinkat(dirfd, "cap_fstatat", 0));
 
+#ifdef __FreeBSD__
   rc = openat(dirfd, "cap_futimesat", O_CREAT, 0600);
   EXPECT_OK(rc);
   EXPECT_OK(close(rc));
   rc = futimesat(dfd_cap, "cap_futimesat", NULL);
   CHECK_RIGHT_RESULT(rc, rights, CAP_FUTIMES, CAP_LOOKUP);
   EXPECT_OK(unlinkat(dirfd, "cap_futimesat", 0));
+#endif // __FreeBSD__
 
   // For linkat(2), need:
   //  - CAP_LINKAT_SOURCE on source
@@ -825,6 +870,7 @@ static void TryDirOps(int dirfd, cap_rights_t rights) {
 
   EXPECT_OK(unlinkat(dirfd, "cap_linkat_src", 0));
 
+#ifdef __FreeBSD__
   rc = mkdirat(dfd_cap, "cap_mkdirat", 0700);
   CHECK_RIGHT_RESULT(rc, rights, CAP_MKDIRAT, CAP_LOOKUP);
   if (rc >= 0) {
@@ -844,6 +890,7 @@ static void TryDirOps(int dirfd, cap_rights_t rights) {
       EXPECT_OK(unlinkat(dirfd, "cap_mknodat", 0));
     }
   }
+#endif
 
   // For renameat(2), need:
   //  - CAP_RENAMEAT_SOURCE on source
@@ -873,11 +920,13 @@ static void TryDirOps(int dirfd, cap_rights_t rights) {
     EXPECT_OK(unlinkat(dirfd, "cap_renameat_src", 0));
   }
 
+#ifdef __FreeBSD__
   rc = symlinkat("test", dfd_cap, "cap_symlinkat");
   CHECK_RIGHT_RESULT(rc, rights, CAP_SYMLINKAT, CAP_LOOKUP);
   if (rc >= 0) {
     EXPECT_OK(unlinkat(dirfd, "cap_symlinkat", 0));
   }
+#endif
 
   rc = openat(dirfd, "cap_unlinkat", O_CREAT, 0600);
   EXPECT_OK(rc);
@@ -918,11 +967,15 @@ void DirOperationsTest(int extra) {
   TRY_DIR_OPS(dfd, CAP_FCHOWN, CAP_LOOKUP);
   TRY_DIR_OPS(dfd, CAP_FCHMOD, CAP_LOOKUP);
   TRY_DIR_OPS(dfd, CAP_FSTAT, CAP_LOOKUP);
+#ifdef __FreeBSD__
   TRY_DIR_OPS(dfd, CAP_FUTIMES, CAP_LOOKUP);
+#endif
+#ifdef __FreeBSD__
   TRY_DIR_OPS(dfd, CAP_MKDIRAT, CAP_LOOKUP);
   TRY_DIR_OPS(dfd, CAP_MKFIFOAT, CAP_LOOKUP);
   TRY_DIR_OPS(dfd, CAP_MKNODAT, CAP_LOOKUP);
   TRY_DIR_OPS(dfd, CAP_SYMLINKAT, CAP_LOOKUP);
+#endif
   TRY_DIR_OPS(dfd, CAP_UNLINKAT, CAP_LOOKUP);
   // Rename needs CAP_RENAMEAT_SOURCE on source directory and
   // CAP_RENAMEAT_TARGET on destination directory.
@@ -948,7 +1001,7 @@ static void TryReadWrite(int cap_fd) {
   EXPECT_OK(read(cap_fd, buffer, sizeof(buffer)));
   int rc = write(cap_fd, "", 0);
   EXPECT_EQ(-1, rc);
-  EXPECT_EQ(ENOTCAPABLE, errno);
+  EXPECT_EQ(notCapableErrno, errno);
 }
 
 FORK_TEST_ON(Capability, SocketTransfer, TmpFile("cap_fd_transfer")) {
@@ -1050,12 +1103,16 @@ TEST(Capability, SyscallAt) {
   cap_rights_init(&r_no_unlink, CAP_READ, CAP_LOOKUP, CAP_MKDIRAT, CAP_MKFIFOAT);
   cap_rights_t r_no_mkdir;
   cap_rights_init(&r_no_mkdir, CAP_READ, CAP_LOOKUP, CAP_UNLINKAT, CAP_MKFIFOAT);
+#ifdef __FreeBSD__
   cap_rights_t r_no_mkfifo;
   cap_rights_init(&r_no_mkfifo, CAP_READ, CAP_LOOKUP, CAP_UNLINKAT, CAP_MKDIRAT);
+#endif
   cap_rights_t r_create;
   cap_rights_init(&r_create, CAP_READ, CAP_LOOKUP, CAP_CREATE);
+#ifdef __FreeBSD__
   cap_rights_t r_bind;
   cap_rights_init(&r_bind, CAP_READ, CAP_LOOKUP, CAP_BIND);
+#endif
 
   int dfd = open(TmpFile("cap_at_topdir"), O_RDONLY);
   EXPECT_OK(dfd);
@@ -1068,44 +1125,57 @@ TEST(Capability, SyscallAt) {
   int cap_dfd_no_mkdir = dup(dfd);
   EXPECT_OK(cap_dfd_no_mkdir);
   EXPECT_OK(cap_rights_limit(cap_dfd_no_mkdir, &r_no_mkdir));
+#ifdef __FreeBSD__
   int cap_dfd_no_mkfifo = dup(dfd);
   EXPECT_OK(cap_dfd_no_mkfifo);
   EXPECT_OK(cap_rights_limit(cap_dfd_no_mkfifo, &r_no_mkfifo));
+#endif
   int cap_dfd_create = dup(dfd);
   EXPECT_OK(cap_dfd_create);
   EXPECT_OK(cap_rights_limit(cap_dfd_create, &r_create));
   int cap_dfd_bind = dup(dfd);
+#ifdef __FreeBSD__
   EXPECT_OK(cap_dfd_bind);
   EXPECT_OK(cap_rights_limit(cap_dfd_bind, &r_bind));
+#endif
 
+#ifdef __FreeBSD__
   // Need CAP_MKDIRAT to mkdirat(2).
   EXPECT_NOTCAPABLE(mkdirat(cap_dfd_no_mkdir, "cap_subdir", 0755));
   rmdir(TmpFile("cap_at_topdir/cap_subdir"));
   EXPECT_OK(mkdirat(cap_dfd_all, "cap_subdir", 0755));
+#endif
 
   // Need CAP_UNLINKAT to unlinkat(dfd, name, AT_REMOVEDIR).
   EXPECT_NOTCAPABLE(unlinkat(cap_dfd_no_unlink, "cap_subdir", AT_REMOVEDIR));
   EXPECT_OK(unlinkat(cap_dfd_all, "cap_subdir", AT_REMOVEDIR));
   rmdir(TmpFile("cap_at_topdir/cap_subdir"));
 
+#ifdef __FreeBSD__
   // Need CAP_MKFIFOAT to mkfifoat(2).
   EXPECT_NOTCAPABLE(mkfifoat(cap_dfd_no_mkfifo, "cap_fifo", 0755));
   unlink(TmpFile("cap_at_topdir/cap_fifo"));
   EXPECT_OK(mkfifoat(cap_dfd_all, "cap_fifo", 0755));
   unlink(TmpFile("cap_at_topdir/cap_fifo"));
+#endif
 
   close(cap_dfd_all);
+#ifdef __FreeBSD__
   close(cap_dfd_no_mkfifo);
+#endif
   close(cap_dfd_no_mkdir);
   close(cap_dfd_no_unlink);
   close(cap_dfd_create);
+#ifdef __FreeBSD__
   close(cap_dfd_bind);
+#endif
   close(dfd);
 
   // Tidy up.
   rmdir(TmpFile("cap_at_topdir"));
 }
 
+#ifdef __FreeBSD__
 TEST(Capability, SyscallAtIfRoot) {
   GTEST_SKIP_IF_NOT_ROOT();
   int rc = mkdir(TmpFile("cap_at_topdir"), 0755);
@@ -1152,6 +1222,9 @@ TEST(Capability, SyscallAtIfRoot) {
   rmdir(TmpFile("cap_at_topdir"));
 }
 
+#endif // __FreeBSD__ (SyscallAtIfRoot)
+
+#ifdef __FreeBSD__
 FORK_TEST_ON(Capability, ExtendedAttributesIfAvailable, TmpFile("cap_extattr")) {
   int fd = open(TmpFile("cap_extattr"), O_RDONLY|O_CREAT, 0644);
   EXPECT_OK(fd);
@@ -1225,6 +1298,8 @@ FORK_TEST_ON(Capability, ExtendedAttributesIfAvailable, TmpFile("cap_extattr")) 
   close(fd);
 }
 
+#endif // __FreeBSD__ (ExtendedAttributesIfAvailable)
+
 TEST(Capability, PipeUnseekable) {
   int fds[2];
   EXPECT_OK(pipe(fds));
@@ -1244,7 +1319,7 @@ TEST(Capability, PipeUnseekable) {
   cap_rights_init(&rights, CAP_READ, CAP_WRITE);
   EXPECT_OK(cap_rights_limit(fds[0], &rights));
   EXPECT_EQ(-1, lseek(fds[0], 0, SEEK_SET));
-  EXPECT_EQ(ENOTCAPABLE, errno);
+  EXPECT_EQ(notCapableErrno, errno);
   // TODO(drysdale): in practical terms it might be nice if ESPIPE trumped ENOTCAPABLE.
   // EXPECT_EQ(ESPIPE, errno);
 
